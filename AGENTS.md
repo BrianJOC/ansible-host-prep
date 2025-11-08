@@ -5,6 +5,7 @@
 - The primary CLI entrypoint is expected under `cmd/bootstrap-tui`, matching the build/run targets; keep each subcommand in its own file for clarity.
 - `phases/` owns the bootstrap pipeline (e.g., `sshconnect`, `sudoensure`, `pythonensure`, `ansibleuser`) plus the shared `Manager`, input definitions, and observers; new phases should expose metadata (ID, inputs, description) and communicate via the shared `phases.Context`.
 - `utils/` hosts supporting libraries (`sshconnection`, `privilege`, `sshkeypair`, `systemuser`, `pkginstaller`); keep these dependency-light so they can be imported from multiple phases.
+- `tui/` contains the Bubble Tea entrypoint (`go run ./tui`) that drives the phase manager; keep this UI thin by delegating logic to phases/util packages.
 - `bin/` is Hermit-managed tooling (Go toolchain, `golangci-lint`, `just`, Python shims); do not edit files there manually.
 
 ## Build, Test, and Development Commands
@@ -13,6 +14,7 @@
 - `just test` – executes `go test ./...` across all packages.
 - `just build` / `just run` – compile or run the `cmd/bootstrap-tui` binary.
 - `just ci` – convenience target for `fmt`, `lint`, `test`, `build`; mirrors the expected CI pipeline.
+- `just tui` – launches the Bubble Tea interface to run the full bootstrap interactively.
 
 ## Coding Style & Naming Conventions
 - Rely on `gofmt` defaults (tabs for indentation, sorted imports); avoid manual alignment.

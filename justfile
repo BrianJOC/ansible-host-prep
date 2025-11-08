@@ -27,5 +27,7 @@ build:
 run:
     go run ./cmd/bootstrap-tui
 
-ci: fmt lint test build
+tui:
+    go run ./tui
 
+ci: fmt lint test build
