@@ -17,10 +17,12 @@
 - Rely on `gofmt` defaults (tabs for indentation, sorted imports); avoid manual alignment.
 - Use lower_snake_case for filenames, mixedCaps for exported Go identifiers, and keep packages lowercase, short, and unique.
 - Keep functions under 40 lines where possible; extract helpers into `internal/<module>` when the API should remain private.
+- Prefer functional options for optional behavior (e.g., `sshconnection.WithTimeout`) instead of proliferating parameters so APIs remain stable.
 
 ## Testing Guidelines
 - Prefer table-driven tests in `_test.go` files beside the code under test; name tests `Test<Component><Scenario>`.
 - Use `t.Helper()` in reusable assertions and `t.Parallel()` when tests do not mutate shared state.
+- Write assertions with `github.com/stretchr/testify/require` for clarity and immediate failures; keep coverage for both success and error paths.
 - Aim to cover edge cases around SSH handling and CLI argument parsing before adding new features.
 
 ## Commit & Pull Request Guidelines
