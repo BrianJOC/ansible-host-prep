@@ -11,11 +11,11 @@ import (
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/BrianJOC/prep-for-ansible/phases"
-	"github.com/BrianJOC/prep-for-ansible/phases/ansibleuser"
-	"github.com/BrianJOC/prep-for-ansible/phases/pythonensure"
-	"github.com/BrianJOC/prep-for-ansible/phases/sshconnect"
-	"github.com/BrianJOC/prep-for-ansible/phases/sudoensure"
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/phases/ansibleuser"
+	"github.com/BrianJOC/ansible-host-prep/phases/pythonensure"
+	"github.com/BrianJOC/ansible-host-prep/phases/sshconnect"
+	"github.com/BrianJOC/ansible-host-prep/phases/sudoensure"
 )
 
 func main() {

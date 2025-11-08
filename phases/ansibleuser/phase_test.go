@@ -8,11 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/BrianJOC/prep-for-ansible/phases"
-	"github.com/BrianJOC/prep-for-ansible/phases/sudoensure"
-	"github.com/BrianJOC/prep-for-ansible/utils/privilege"
-	"github.com/BrianJOC/prep-for-ansible/utils/sshkeypair"
-	"github.com/BrianJOC/prep-for-ansible/utils/systemuser"
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/phases/sudoensure"
+	"github.com/BrianJOC/ansible-host-prep/utils/privilege"
+	"github.com/BrianJOC/ansible-host-prep/utils/sshkeypair"
+	"github.com/BrianJOC/ansible-host-prep/utils/systemuser"
 )
 
 func TestPhaseCreatesUserWithKey(t *testing.T) {

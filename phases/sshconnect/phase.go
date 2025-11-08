@@ -8,8 +8,8 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/BrianJOC/prep-for-ansible/phases"
-	"github.com/BrianJOC/prep-for-ansible/utils/sshconnection"
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/utils/sshconnection"
 )
 
 const (

@@ -1,4 +1,4 @@
-module github.com/BrianJOC/prep-for-ansible
+module github.com/BrianJOC/ansible-host-prep
 
 go 1.25.4
 

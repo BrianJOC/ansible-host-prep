@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/BrianJOC/prep-for-ansible/phases"
-	"github.com/BrianJOC/prep-for-ansible/phases/sudoensure"
-	"github.com/BrianJOC/prep-for-ansible/utils/pkginstaller"
-	"github.com/BrianJOC/prep-for-ansible/utils/privilege"
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/phases/sudoensure"
+	"github.com/BrianJOC/ansible-host-prep/utils/pkginstaller"
+	"github.com/BrianJOC/ansible-host-prep/utils/privilege"
 )
 
 func TestPhaseEnsuresPython(t *testing.T) {

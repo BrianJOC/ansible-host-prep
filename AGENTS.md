@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `go.mod` defines the Go 1.25.4 module `github.com/BrianJOC/prep-for-ansible`; place reusable packages under `internal/` or `pkg/` as they are added.
+- `go.mod` defines the Go 1.25.4 module `github.com/BrianJOC/ansible-host-prep`; place reusable packages under `internal/` or `pkg/` as they are added.
 - The primary CLI entrypoint is expected under `cmd/bootstrap-tui`, matching the build/run targets; keep each subcommand in its own file for clarity.
 - `phases/` owns the bootstrap pipeline (e.g., `sshconnect`, `sudoensure`, `pythonensure`, `ansibleuser`) plus the shared `Manager`, input definitions, and observers; new phases should expose metadata (ID, inputs, description) and communicate via the shared `phases.Context`.
 - `utils/` hosts supporting libraries (`sshconnection`, `privilege`, `sshkeypair`, `systemuser`, `pkginstaller`); keep these dependency-light so they can be imported from multiple phases.

@@ -17,7 +17,7 @@ import (
 const (
 	defaultBits    = 4096
 	minKeyBits     = 2048
-	defaultComment = "prep-for-ansible"
+	defaultComment = "ansible-host-prep"
 )
 
 // KeyPairInfo describes the ensured key pair.

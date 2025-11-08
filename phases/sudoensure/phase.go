@@ -6,9 +6,9 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/BrianJOC/prep-for-ansible/phases"
-	"github.com/BrianJOC/prep-for-ansible/phases/sshconnect"
-	"github.com/BrianJOC/prep-for-ansible/utils/privilege"
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/phases/sshconnect"
+	"github.com/BrianJOC/ansible-host-prep/utils/privilege"
 )
 
 const (
