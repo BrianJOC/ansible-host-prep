@@ -86,8 +86,9 @@ func TestPhaseValidationError(t *testing.T) {
 
 	err := phase.Run(context.Background(), ctx)
 	require.Error(t, err)
-	var valErr phases.ValidationError
-	require.ErrorAs(t, err, &valErr)
+	var inputErr phases.InputRequestError
+	require.ErrorAs(t, err, &inputErr)
+	require.Equal(t, InputHost, inputErr.Input.ID)
 }
 
 func TestPhasePropagatesConnectorError(t *testing.T) {
@@ -107,6 +108,26 @@ func TestPhasePropagatesConnectorError(t *testing.T) {
 
 	err := phase.Run(context.Background(), ctx)
 	require.EqualError(t, err, "connect failed")
+}
+
+func TestPhaseInvalidPortRequestsInput(t *testing.T) {
+	t.Parallel()
+
+	phase := New()
+	ctx := phases.NewContext()
+	setInputs(ctx, map[string]string{
+		InputHost:       "example.com",
+		InputUsername:   "deploy",
+		InputAuthMethod: authMethodPassword,
+		InputPassword:   "secret",
+		InputPort:       "abc",
+	})
+
+	err := phase.Run(context.Background(), ctx)
+	require.Error(t, err)
+	var inputErr phases.InputRequestError
+	require.ErrorAs(t, err, &inputErr)
+	require.Equal(t, InputPort, inputErr.Input.ID)
 }
 
 func setInputs(ctx *phases.Context, values map[string]string) {

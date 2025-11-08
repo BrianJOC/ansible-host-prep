@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -52,6 +53,8 @@ type model struct {
 	prompting    bool
 	statusMsg    string
 
+	spinner spinner.Model
+
 	done error
 }
 
@@ -91,6 +94,9 @@ func newModel() *model {
 	ti.Placeholder = "enter value"
 	ti.Focus()
 
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+
 	return &model{
 		manager:      manager,
 		phaseCtx:     phaseCtx,
@@ -99,6 +105,7 @@ func newModel() *model {
 		phases:       states,
 		order:        order,
 		prompt:       ti,
+		spinner:      sp,
 	}
 }
 
@@ -107,6 +114,7 @@ func (m *model) Init() tea.Cmd {
 		runManagerCmd(m.manager, m.phaseCtx),
 		waitPhaseEventCmd(m.observer),
 		waitInputRequestCmd(m.inputHandler),
+		m.spinner.Tick,
 	)
 }
 
@@ -139,12 +147,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prompt, cmd = m.prompt.Update(msg)
 			return m, cmd
 		}
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case phaseStartedMsg:
 		if state, ok := m.phases[msg.meta.ID]; ok {
 			state.status = statusRunning
 			state.err = nil
 		}
-		return m, waitPhaseEventCmd(m.observer)
+		m.statusMsg = fmt.Sprintf("Running %s", msg.meta.Title)
+		return m, tea.Batch(waitPhaseEventCmd(m.observer), m.spinner.Tick)
 	case phaseCompletedMsg:
 		if state, ok := m.phases[msg.meta.ID]; ok {
 			if msg.err != nil {
@@ -155,7 +168,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				state.err = nil
 			}
 		}
-		return m, waitPhaseEventCmd(m.observer)
+		if msg.err != nil {
+			m.statusMsg = fmt.Sprintf("%s failed: %v", msg.meta.Title, msg.err)
+		} else {
+			m.statusMsg = fmt.Sprintf("%s completed", msg.meta.Title)
+		}
+		return m, tea.Batch(waitPhaseEventCmd(m.observer), m.spinner.Tick)
 	case inputRequestMsg:
 		m.activePrompt = &msg
 		m.prompting = true
@@ -163,6 +181,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.prompt.SetValue("")
 		m.prompt.Focus()
 		m.statusMsg = fmt.Sprintf("Phase %s requests %s", msg.meta.Title, msg.input.Label)
+		m.statusMsg = fmt.Sprintf("%s needs %s", msg.meta.Title, msg.input.Label)
 		return m, nil
 	case phasesFinishedMsg:
 		m.done = msg.err
@@ -185,10 +204,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) View() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Prep for Ansible\n\n")
+	fmt.Fprintf(&b, "Prep for Ansible\n")
+	fmt.Fprintf(&b, "Progress: %d/%d complete\n\n", completedCount(m.phases), len(m.order))
 	for _, id := range m.order {
 		state := m.phases[id]
-		fmt.Fprintf(&b, "[%s] %s\n", statusLabel(state.status), state.meta.Title)
+		symbol := statusLabel(state.status)
+		if state.status == statusRunning {
+			symbol = m.spinner.View()
+		}
+		fmt.Fprintf(&b, "%s [%s] %s\n", symbol, statusLabel(state.status), state.meta.Title)
 		if state.err != nil {
 			fmt.Fprintf(&b, "  error: %v\n", state.err)
 		} else if state.status == statusRunning {
@@ -233,6 +257,16 @@ func allFinished(states map[string]*phaseState) bool {
 		}
 	}
 	return true
+}
+
+func completedCount(states map[string]*phaseState) int {
+	count := 0
+	for _, st := range states {
+		if st.status == statusSuccess {
+			count++
+		}
+	}
+	return count
 }
 
 type phaseStartedMsg struct {

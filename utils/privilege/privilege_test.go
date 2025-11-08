@@ -48,7 +48,7 @@ func TestEnsureElevationInstallsSudoWhenMissing(t *testing.T) {
 	r := &fakeRunner{
 		responses: []fakeResponse{
 			{match: "sudo -S", stderr: "sudo: command not found", err: missingErr},
-			{match: "su - root -c \"true\"", err: nil},
+			{match: "su - root -c 'true'", err: nil},
 			{match: "su - root -c", err: nil},
 			{match: "sudo -S", err: nil},
 			{match: "sudo -S", err: nil},
@@ -70,6 +70,20 @@ func TestEnsureElevatedClientValidatesInputs(t *testing.T) {
 	_, err = Password{}.validate()
 	require.Error(t, err)
 	require.IsType(t, PasswordError{}, err)
+}
+
+func TestRunPrivilegedPreservesMultilineScripts(t *testing.T) {
+	t.Parallel()
+
+	script := "line1\nline2"
+	r := &fakeRunner{
+		responses: []fakeResponse{
+			{match: "line1\nline2"},
+		},
+	}
+
+	_, _, err := runPrivileged(r, methodSudo, "password", script)
+	require.NoError(t, err)
 }
 
 type fakeRunner struct {

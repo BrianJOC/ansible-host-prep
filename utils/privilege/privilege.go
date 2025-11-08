@@ -2,6 +2,7 @@ package privilege
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -157,12 +158,13 @@ func (r *sshRunner) Run(cmd string, stdin string) (string, string, error) {
 }
 
 func runPrivileged(r runner, method elevationMethod, password, cmd string) (string, string, error) {
+	quotedCmd := shellQuote(cmd)
 	switch method {
 	case methodSudo:
-		command := fmt.Sprintf("sudo -S -p '' -k bash -c %q", cmd)
+		command := fmt.Sprintf("sudo -S -p '' -k bash -c %s", quotedCmd)
 		return r.Run(command, password+"\n")
 	case methodSu:
-		command := fmt.Sprintf("su - root -c %q", cmd)
+		command := fmt.Sprintf("su - root -c %s", quotedCmd)
 		return r.Run(command, password+"\n")
 	default:
 		return "", "", fmt.Errorf("unsupported elevation method %q", method)
@@ -181,11 +183,9 @@ func ensureRootViaSu(r runner, password string) error {
 }
 
 func ensureSudoInstalled(r runner, method elevationMethod, password string) error {
-	cmd := ensureSudoScript
-	if method == methodSu {
-		cmd = fmt.Sprintf("bash -c %q", ensureSudoScript)
-	}
-	_, stderr, err := runPrivileged(r, method, password, cmd)
+	encoded := base64.StdEncoding.EncodeToString([]byte(ensureSudoScript))
+	command := fmt.Sprintf("printf %%s %s | base64 -d | bash", shellQuote(encoded))
+	_, stderr, err := runPrivileged(r, method, password, command)
 	if err != nil {
 		return EnsureSudoError{Err: err, Stderr: stderr}
 	}
@@ -224,4 +224,11 @@ func (p Password) validate() (string, error) {
 		return "", PasswordError{Reason: "password must not be empty"}
 	}
 	return p.Value, nil
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
