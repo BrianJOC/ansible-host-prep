@@ -3,6 +3,7 @@ package phases
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -99,6 +100,98 @@ func TestManagerDetectsDuplicates(t *testing.T) {
 	err := manager.Register(&fakePhase{meta: PhaseMetadata{ID: "ssh"}}, &fakePhase{meta: PhaseMetadata{ID: "ssh"}})
 	require.Error(t, err)
 	require.IsType(t, DuplicatePhaseError{}, err)
+}
+
+func TestManagerHandlesInputRequest(t *testing.T) {
+	t.Parallel()
+
+	var attempts int
+	phase := &fakePhase{
+		meta: PhaseMetadata{ID: "sudo"},
+		run: func(ctx context.Context, c *Context) error {
+			attempts++
+			if val, ok := GetInput(c, "sudo", "password"); ok && val != "" {
+				return nil
+			}
+			return InputRequestError{
+				PhaseID: "sudo",
+				Input: InputDefinition{
+					ID:       "password",
+					Label:    "Password",
+					Kind:     InputKindSecret,
+					Required: true,
+				},
+				Reason: "required",
+			}
+		},
+	}
+
+	handlerCalls := 0
+	handler := InputHandlerFunc(func(meta PhaseMetadata, input InputDefinition, reason string) (any, error) {
+		handlerCalls++
+		require.Equal(t, "sudo", meta.ID)
+		require.Equal(t, "password", input.ID)
+		return "secret", nil
+	})
+
+	manager := NewManager(WithInputHandler(handler))
+	require.NoError(t, manager.Register(phase))
+	err := manager.Run(context.Background(), NewContext())
+	require.NoError(t, err)
+	require.Equal(t, 2, attempts)
+	require.Equal(t, 1, handlerCalls)
+}
+
+func TestManagerInputHandlerError(t *testing.T) {
+	t.Parallel()
+
+	phase := &fakePhase{
+		meta: PhaseMetadata{ID: "sudo"},
+		run: func(context.Context, *Context) error {
+			return InputRequestError{
+				PhaseID: "sudo",
+				Input: InputDefinition{
+					ID: "password",
+				},
+			}
+		},
+	}
+
+	manager := NewManager(WithInputHandler(InputHandlerFunc(func(PhaseMetadata, InputDefinition, string) (any, error) {
+		return nil, fmt.Errorf("user cancelled")
+	})))
+
+	require.NoError(t, manager.Register(phase))
+	err := manager.Run(context.Background(), NewContext())
+	require.Error(t, err)
+	var execErr PhaseExecutionError
+	require.ErrorAs(t, err, &execErr)
+	require.ErrorContains(t, execErr, "user cancelled")
+}
+
+func TestManagerPropagatesInputRequestWithoutHandler(t *testing.T) {
+	t.Parallel()
+
+	phase := &fakePhase{
+		meta: PhaseMetadata{ID: "sudo"},
+		run: func(context.Context, *Context) error {
+			return InputRequestError{
+				PhaseID: "sudo",
+				Input: InputDefinition{
+					ID: "password",
+				},
+			}
+		},
+	}
+
+	manager := NewManager()
+	require.NoError(t, manager.Register(phase))
+	err := manager.Run(context.Background(), NewContext())
+	require.Error(t, err)
+	var execErr PhaseExecutionError
+	require.ErrorAs(t, err, &execErr)
+	var inputErr InputRequestError
+	require.ErrorAs(t, execErr.Err, &inputErr)
 }
 
 type fakePhase struct {

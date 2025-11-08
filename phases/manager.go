@@ -1,11 +1,15 @@
 package phases
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Manager coordinates the ordered execution of phases.
 type Manager struct {
-	phases    []Phase
-	observers []Observer
+	phases       []Phase
+	observers    []Observer
+	inputHandler InputHandler
 }
 
 // ManagerOption mutates manager configuration.
@@ -18,6 +22,16 @@ func WithObserver(obs Observer) ManagerOption {
 			return
 		}
 		m.observers = append(m.observers, obs)
+	}
+}
+
+// WithInputHandler registers a handler to satisfy input requests.
+func WithInputHandler(handler InputHandler) ManagerOption {
+	return func(m *Manager) {
+		if handler == nil {
+			return
+		}
+		m.inputHandler = handler
 	}
 }
 
@@ -59,13 +73,35 @@ func (m *Manager) Run(ctx context.Context, phaseCtx *Context) error {
 	for _, phase := range m.phases {
 		meta := phase.Metadata()
 		m.notifyStart(meta)
-		err := phase.Run(ctx, phaseCtx)
+		err := m.executePhase(ctx, phaseCtx, phase, meta)
 		m.notifyComplete(meta, err)
 		if err != nil {
 			return PhaseExecutionError{Phase: meta, Err: err}
 		}
 	}
 	return nil
+}
+
+func (m *Manager) executePhase(ctx context.Context, phaseCtx *Context, phase Phase, meta PhaseMetadata) error {
+	for {
+		err := phase.Run(ctx, phaseCtx)
+		if err == nil {
+			return nil
+		}
+		var inputErr InputRequestError
+		if errors.As(err, &inputErr) {
+			if m.inputHandler == nil {
+				return err
+			}
+			value, handlerErr := m.inputHandler.RequestInput(meta, inputErr.Input, inputErr.Reason)
+			if handlerErr != nil {
+				return handlerErr
+			}
+			SetInput(phaseCtx, inputErr.PhaseID, inputErr.Input.ID, value)
+			continue
+		}
+		return err
+	}
 }
 
 func (m *Manager) hasPhase(id string) bool {
