@@ -134,10 +134,7 @@ func shouldRequestPassword(err error) bool {
 		return true
 	}
 	var suAuth privilege.SuAuthenticationError
-	if errors.As(err, &suAuth) {
-		return true
-	}
-	return false
+	return errors.As(err, &suAuth)
 }
 
 func passwordInputDefinition() phases.InputDefinition {

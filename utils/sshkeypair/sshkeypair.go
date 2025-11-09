@@ -34,7 +34,6 @@ type Option func(*ensureOptions) error
 type ensureOptions struct {
 	bits    int
 	comment string
-	mode    os.FileMode
 }
 
 // WithKeyBits overrides the RSA key size.

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/BrianJOC/ansible-host-prep/phases"
 	"github.com/BrianJOC/ansible-host-prep/utils/sshconnection"
@@ -219,7 +221,7 @@ func inputDefinition(inputID string) phases.InputDefinition {
 	}
 	return phases.InputDefinition{
 		ID:    inputID,
-		Label: strings.Title(strings.ReplaceAll(inputID, "_", " ")),
+		Label: defaultLabel(inputID),
 		Kind:  phases.InputKindText,
 	}
 }
@@ -230,4 +232,10 @@ func inputRequestError(inputID, reason string) phases.InputRequestError {
 		Input:   inputDefinition(inputID),
 		Reason:  reason,
 	}
+}
+
+var titleCaser = cases.Title(language.English)
+
+func defaultLabel(inputID string) string {
+	return titleCaser.String(strings.ReplaceAll(inputID, "_", " "))
 }
