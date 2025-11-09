@@ -14,6 +14,7 @@ type PhaseMetadata struct {
 	Title       string
 	Description string
 	Inputs      []InputDefinition
+	Tags        []string
 }
 
 // Observer receives lifecycle callbacks for each phase.

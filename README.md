@@ -125,6 +125,48 @@ func (summaryPhase) Run(ctx context.Context, phaseCtx *phases.Context) error {
 
 Swap in any combination of built-in or custom phases using `phasedapp.WithPhases`, or extend behavior with `WithManagerOptions` and `WithProgramOptions`.
 
+### Ergonomic Helpers
+
+- **SimplePhase** – build phases inline without declaring new types:
+
+```go
+phase := phasedapp.NewPhase(
+	phases.PhaseMetadata{
+		ID:    "greet",
+		Title: "Greet Host",
+		Inputs: []phases.InputDefinition{
+			phasedapp.TextInput("operator", "Operator Name", phasedapp.Required()),
+		},
+		Tags: []string{"demo"},
+	},
+	func(ctx context.Context, phaseCtx *phases.Context) error {
+		value, ok := phases.GetInput(phaseCtx, "greet", "operator")
+		if ok {
+			phasedapp.SetContext(phaseCtx, phasedapp.Namespace("demo", "operator"), value)
+		}
+		name, _ := phasedapp.GetContext[string](phaseCtx, phasedapp.Namespace("demo", "operator"))
+		log.Printf("Hello %s!", name)
+		return nil
+	},
+)
+```
+
+- **Input helpers** – `TextInput`, `SecretInput`, `SelectInput`, plus options like `phasedapp.WithDescription` and `phasedapp.WithDefault`.
+- **Context helpers** – `Namespace`, `SetContext`, `GetContext` provide typed storage for shared artifacts (SSH clients, elevated shells, etc.).
+- **Builder & Bundles** – compose reusable bundles of phases and validate duplicates:
+
+```go
+phaseList, err := phasedapp.NewBuilder().
+	AddPhases(ansibleprep.Bundle()...).
+	AddPhase(customPhase).
+	Build()
+if err != nil { log.Fatal(err) }
+
+app, _ := phasedapp.New(phasedapp.WithPhases(phaseList...))
+```
+
+Use `phasedapp.WithBundle(ansibleprep.Bundle)` when you just need the default Ansible prep pipeline, or `phasedapp.SelectPhases(phases, phasedapp.WithTag("ansible"))` to filter by metadata tags.
+
 ## Repository Layout
 
 ```
