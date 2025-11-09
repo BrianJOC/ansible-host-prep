@@ -1,3 +1,7 @@
+// Package phasedapp exposes a reusable Bubble Tea orchestrator for phased
+// bootstrap pipelines. It wires the phases.Manager, observers, and input
+// handling behind a simple lifecycle API so other binaries can embed the
+// interactive workflow without copying UI code.
 package phasedapp
 
 import (
@@ -88,7 +92,7 @@ func New(opts ...Option) (*App, error) {
 	return &App{cfg: cfg}, nil
 }
 
-// Start begins executing the TUI pipeline from the first phase.
+// Start begins executing the TUI pipeline from the first registered phase.
 func (a *App) Start(ctx context.Context) error {
 	return a.start(ctx, 0)
 }
