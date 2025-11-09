@@ -1,8 +1,10 @@
 package phasedapp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -136,7 +138,12 @@ func TestAppRejectsConcurrentStart(t *testing.T) {
 
 func newTestApp(t *testing.T, opts ...Option) *App {
 	t.Helper()
-	opts = append(opts, WithProgramOptions(tea.WithoutRenderer()))
+	headlessInput := bytes.NewBuffer(nil)
+	opts = append(opts, WithProgramOptions(
+		tea.WithoutRenderer(),
+		tea.WithInput(headlessInput),
+		tea.WithOutput(io.Discard),
+	))
 	app, err := New(opts...)
 	if err != nil {
 		t.Fatalf("app init error: %v", err)
