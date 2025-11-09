@@ -14,6 +14,8 @@ Homelab nodes or freshly provisioned servers often lack the prerequisites that a
 
 - **Hermit-managed toolchain** – Go, Python, `just`, and lint tooling are pinned for reproducible builds.
 - **Phase manager** – Each step (`sshconnect`, `sudoensure`, `pythonensure`, `ansibleuser`) exposes metadata, inputs, and shared context so the TUI can prompt for credentials or key paths automatically.
+- **Responsive TUI workflow** – Bubble Tea interface resizes cleanly, surfaces keyboard shortcuts, and provides per-phase action menus (retry, copy errors, etc.) while remembering your last answers so restarts are painless.
+- **Secure input handling** – Text defaults show up as placeholders until you press enter, secret prompts never prefill or echo actual values, and all logs/status messages are auto-redacted to avoid leaking credentials.
 - **Dedicated ansible user** – Generates or reuses an SSH key pair, installs it in `authorized_keys`, and grants passwordless sudo with `/etc/sudoers.d` management.
 - **Extensible architecture** – Additional phases can be registered with the manager to extend the bootstrap pipeline without touching the TUI.
 

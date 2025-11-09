@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  just-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Init Hermit
+        uses: cashapp/activate-hermit@v1
+
+      - name: Run just ci 
+        shell: bash
+        run: |
+          just ci
