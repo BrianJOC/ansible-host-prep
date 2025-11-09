@@ -51,6 +51,7 @@ type model struct {
 	prompt       textinput.Model
 	activePrompt *inputRequestMsg
 	prompting    bool
+	selectIndex  int
 	statusMsg    string
 
 	spinner spinner.Model
@@ -121,6 +122,9 @@ func (m *model) Init() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.handleSelectNavigation(msg) {
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			if m.prompting {
@@ -129,12 +133,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEnter:
 			if m.prompting {
-				value := strings.TrimSpace(m.prompt.Value())
-				if value == "" && m.activePrompt != nil && m.activePrompt.input.Required {
-					m.statusMsg = "Input required"
-					return m, nil
+				if m.isSelectPrompt() {
+					value, ok := m.currentSelectionValue()
+					if !ok {
+						m.statusMsg = "No options available"
+						return m, nil
+					}
+					m.inputHandler.respond(value, nil)
+				} else {
+					value := strings.TrimSpace(m.prompt.Value())
+					if value == "" && m.activePrompt != nil && m.activePrompt.input.Required {
+						m.statusMsg = "Input required"
+						return m, nil
+					}
+					m.inputHandler.respond(value, nil)
 				}
-				m.inputHandler.respond(value, nil)
 				m.prompting = false
 				m.activePrompt = nil
 				m.prompt.SetValue("")
@@ -142,7 +155,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, waitInputRequestCmd(m.inputHandler)
 			}
 		}
-		if m.prompting {
+		if m.prompting && !m.isSelectPrompt() {
 			var cmd tea.Cmd
 			m.prompt, cmd = m.prompt.Update(msg)
 			return m, cmd
@@ -177,11 +190,20 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case inputRequestMsg:
 		m.activePrompt = &msg
 		m.prompting = true
-		m.prompt.Placeholder = msg.input.Label
-		m.prompt.SetValue("")
-		m.prompt.Focus()
-		m.statusMsg = fmt.Sprintf("Phase %s requests %s", msg.meta.Title, msg.input.Label)
-		m.statusMsg = fmt.Sprintf("%s needs %s", msg.meta.Title, msg.input.Label)
+		m.selectIndex = 0
+		if msg.input.Kind == phases.InputKindSelect {
+			m.prompt.Blur()
+			if len(msg.input.Options) == 0 {
+				m.statusMsg = fmt.Sprintf("%s requested %s but no options were provided", msg.meta.Title, msg.input.Label)
+			} else {
+				m.statusMsg = fmt.Sprintf("%s needs %s (use arrows or j/k)", msg.meta.Title, msg.input.Label)
+			}
+		} else {
+			m.prompt.Placeholder = msg.input.Label
+			m.prompt.SetValue("")
+			m.prompt.Focus()
+			m.statusMsg = fmt.Sprintf("%s needs %s", msg.meta.Title, msg.input.Label)
+		}
 		return m, nil
 	case phasesFinishedMsg:
 		m.done = msg.err
@@ -193,7 +215,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.prompting {
+	if m.prompting && !m.isSelectPrompt() {
 		var cmd tea.Cmd
 		m.prompt, cmd = m.prompt.Update(msg)
 		return m, cmd
@@ -225,7 +247,27 @@ func (m *model) View() string {
 		if m.activePrompt.reason != "" {
 			fmt.Fprintf(&b, "(reason: %s)\n", m.activePrompt.reason)
 		}
-		fmt.Fprintf(&b, "> %s\n", m.prompt.View())
+		if m.isSelectPrompt() {
+			options := m.activePrompt.input.Options
+			if len(options) == 0 {
+				fmt.Fprintf(&b, "No options available\n")
+			} else {
+				fmt.Fprintf(&b, "Use ↑/↓ or j/k, Enter to confirm:\n")
+				for idx, opt := range options {
+					cursor := " "
+					if idx == m.selectIndex {
+						cursor = ">"
+					}
+					fmt.Fprintf(&b, "%s %s", cursor, opt.Label)
+					if opt.Description != "" {
+						fmt.Fprintf(&b, " — %s", opt.Description)
+					}
+					fmt.Fprint(&b, "\n")
+				}
+			}
+		} else {
+			fmt.Fprintf(&b, "> %s\n", m.prompt.View())
+		}
 	}
 	if m.done != nil {
 		fmt.Fprintf(&b, "\nPress Ctrl+C to exit.\n")
@@ -267,6 +309,67 @@ func completedCount(states map[string]*phaseState) int {
 		}
 	}
 	return count
+}
+
+func (m *model) isSelectPrompt() bool {
+	return m.prompting && m.activePrompt != nil && m.activePrompt.input.Kind == phases.InputKindSelect
+}
+
+func (m *model) currentSelectionValue() (string, bool) {
+	if !m.isSelectPrompt() {
+		return "", false
+	}
+	options := m.activePrompt.input.Options
+	if len(options) == 0 {
+		return "", false
+	}
+	if m.selectIndex < 0 {
+		m.selectIndex = 0
+	}
+	if m.selectIndex >= len(options) {
+		m.selectIndex = len(options) - 1
+	}
+	return options[m.selectIndex].Value, true
+}
+
+func (m *model) handleSelectNavigation(msg tea.KeyMsg) bool {
+	if !m.isSelectPrompt() {
+		return false
+	}
+	switch msg.Type {
+	case tea.KeyUp:
+		m.moveSelection(-1)
+		return true
+	case tea.KeyDown:
+		m.moveSelection(1)
+		return true
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case 'k':
+			m.moveSelection(-1)
+			return true
+		case 'j':
+			m.moveSelection(1)
+			return true
+		}
+	}
+	return false
+}
+
+func (m *model) moveSelection(delta int) {
+	if !m.isSelectPrompt() {
+		return
+	}
+	options := m.activePrompt.input.Options
+	if len(options) == 0 {
+		return
+	}
+	count := len(options)
+	m.selectIndex = (m.selectIndex + delta) % count
+	if m.selectIndex < 0 {
+		m.selectIndex += count
+	}
 }
 
 type phaseStartedMsg struct {
