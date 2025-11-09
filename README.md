@@ -38,16 +38,99 @@ You can also drive individual phases or the CLI without the TUI:
 
 ```bash
 just run                 # go run ./cmd/bootstrap-tui
-go run ./tui             # identical to `just tui`
+go run ./cmd/bootstrap-tui  # identical to `just run`
 just test                # go test ./...
 ```
+
+## Embedding the Phased App
+
+The Bubble Tea workflow now lives in `pkg/phasedapp`, making it easy for other binaries to consume. The API mirrors Cobra-style ergonomics: configure phases and options, then call `Start`/`Stop`.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"strings"
+
+	"github.com/BrianJOC/ansible-host-prep/phases"
+	"github.com/BrianJOC/ansible-host-prep/pkg/phasedapp"
+)
+
+func main() {
+	app, err := phasedapp.New(
+		phasedapp.WithPhases(
+			greetPhase{},
+			summaryPhase{},
+		),
+	)
+	if err != nil {
+		log.Fatalf("setup failed: %v", err)
+	}
+	defer app.Stop()
+
+	if err := app.Start(context.Background()); err != nil {
+		log.Fatalf("bootstrap failed: %v", err)
+	}
+}
+
+type greetPhase struct{}
+
+func (g greetPhase) Metadata() phases.PhaseMetadata {
+	return phases.PhaseMetadata{
+		ID:          "greet",
+		Title:       "Greet Host",
+		Description: "Collect operator name and greet the target host.",
+		Inputs: []phases.InputDefinition{
+			{ID: "operator_name", Label: "Operator Name", Kind: phases.InputKindText},
+		},
+	}
+}
+
+func (g greetPhase) Run(ctx context.Context, phaseCtx *phases.Context) error {
+	value, ok := phases.GetInput(phaseCtx, "greet", "operator_name")
+	name := strings.TrimSpace(fmt.Sprint(value))
+	if !ok || name == "" {
+		return phases.InputRequestError{
+			PhaseID: "greet",
+			Input: phases.InputDefinition{
+				ID:       "operator_name",
+				Label:    "Operator Name",
+				Kind:     phases.InputKindText,
+				Required: true,
+			},
+		}
+	}
+	log.Printf("Hello %s, beginning bootstrap…", name)
+	return nil
+}
+
+type summaryPhase struct{}
+
+func (summaryPhase) Metadata() phases.PhaseMetadata {
+	return phases.PhaseMetadata{
+		ID:          "summary",
+		Title:       "Summary",
+		Description: "Display a final message once bootstrap completes.",
+	}
+}
+
+func (summaryPhase) Run(ctx context.Context, phaseCtx *phases.Context) error {
+	log.Println("Bootstrap pipeline complete!")
+	return nil
+}
+```
+
+Swap in any combination of built-in or custom phases using `phasedapp.WithPhases`, or extend behavior with `WithManagerOptions` and `WithProgramOptions`.
 
 ## Repository Layout
 
 ```
 cmd/bootstrap-tui   # CLI entrypoint used by `just run`
+pkg/phasedapp       # Reusable Bubble Tea runner library
 phases/             # Phase manager plus sshconnect, sudoensure, pythonensure, ansibleuser
-tui/                # Bubble Tea program that orchestrates phases + prompts for inputs
 utils/              # Shared helpers (sshconnection, privilege, sshkeypair, systemuser, pkginstaller)
 bin/                # Hermit-managed shims; never edit manually
 .hermit/            # Toolchain caches (ignored except for Go binaries)
@@ -65,14 +148,14 @@ All commands run inside the Hermit environment installed by `just init`.
 | Tests         | `just test`             |
 | Build binary  | `just build`            |
 | Run CLI       | `just run`              |
-| Run full TUI  | `just tui`              |
+| Run full TUI  | `just tui` (alias for `go run ./cmd/bootstrap-tui`) |
 | CI bundle     | `just ci`               |
 
 ### Adding a Phase
 
 1. Create a package under `phases/<name>`.
 2. Implement `phases.Phase` with metadata (ID, title, description, inputs) and a `Run` method that reads/writes `phases.Context`.
-3. Register the new phase in `tui/main.go` (or wherever the manager is constructed) in the desired order.
+3. Register the new phase in `cmd/bootstrap-tui/main.go` (or wherever the manager is constructed) in the desired order.
 4. Add table-driven tests in `<name>/phase_test.go`, mocking any SSH/system interactions.
 
 ### Sharing Data Between Phases

@@ -31,6 +31,6 @@ run:
     go run ./cmd/bootstrap-tui
 
 tui:
-    go run ./tui
+    go run ./cmd/bootstrap-tui
 
 ci: fmt lint test build

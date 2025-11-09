@@ -1,11 +1,11 @@
-package main
+package phasedapp
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/atotto/clipboard"
@@ -17,16 +17,129 @@ import (
 	"golang.org/x/text/language"
 
 	"github.com/BrianJOC/ansible-host-prep/phases"
-	"github.com/BrianJOC/ansible-host-prep/phases/ansibleuser"
-	"github.com/BrianJOC/ansible-host-prep/phases/pythonensure"
-	"github.com/BrianJOC/ansible-host-prep/phases/sshconnect"
-	"github.com/BrianJOC/ansible-host-prep/phases/sudoensure"
 )
 
-func main() {
-	if _, err := tea.NewProgram(newModel()).Run(); err != nil {
-		log.Fatalf("tui exited with error: %v", err)
+var (
+	// ErrNoPhases indicates no phases were supplied when constructing an App.
+	ErrNoPhases = errors.New("phasedapp: at least one phase must be registered")
+	// ErrProgramRunning reports that Start was invoked while the program is already running.
+	ErrProgramRunning = errors.New("phasedapp: program already running")
+)
+
+// Config controls how an App should be assembled.
+type Config struct {
+	Phases         []phases.Phase
+	ManagerOptions []phases.ManagerOption
+	ProgramOptions []tea.ProgramOption
+}
+
+// Option mutates Config during construction.
+type Option func(*Config)
+
+// WithPhases sets the ordered phases the app should execute.
+func WithPhases(phases ...phases.Phase) Option {
+	return func(cfg *Config) {
+		if cfg == nil {
+			return
+		}
+		cfg.Phases = append(cfg.Phases, phases...)
 	}
+}
+
+// WithManagerOptions appends custom manager options.
+func WithManagerOptions(opts ...phases.ManagerOption) Option {
+	return func(cfg *Config) {
+		if cfg == nil {
+			return
+		}
+		cfg.ManagerOptions = append(cfg.ManagerOptions, opts...)
+	}
+}
+
+// WithProgramOptions appends tea.Program options.
+func WithProgramOptions(opts ...tea.ProgramOption) Option {
+	return func(cfg *Config) {
+		if cfg == nil {
+			return
+		}
+		cfg.ProgramOptions = append(cfg.ProgramOptions, opts...)
+	}
+}
+
+// App hosts the Bubble Tea-driven phase runner.
+type App struct {
+	cfg      Config
+	mu       sync.Mutex
+	program  *tea.Program
+	inFlight bool
+}
+
+// New constructs an App from the provided options.
+func New(opts ...Option) (*App, error) {
+	cfg := Config{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	if len(cfg.Phases) == 0 {
+		return nil, ErrNoPhases
+	}
+	return &App{cfg: cfg}, nil
+}
+
+// Start begins executing the TUI pipeline from the first phase.
+func (a *App) Start(ctx context.Context) error {
+	return a.start(ctx, 0)
+}
+
+// StartFrom begins executing the TUI pipeline from the provided phase index.
+func (a *App) StartFrom(ctx context.Context, start int) error {
+	if start < 0 {
+		start = 0
+	}
+	return a.start(ctx, start)
+}
+
+// Stop signals the running TUI program (if any) to exit.
+func (a *App) Stop() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.program == nil {
+		return nil
+	}
+	a.program.Quit()
+	return nil
+}
+
+func (a *App) start(ctx context.Context, start int) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	model, err := newModel(a.cfg, start, ctx)
+	if err != nil {
+		return err
+	}
+	program := tea.NewProgram(model, a.cfg.ProgramOptions...)
+
+	a.mu.Lock()
+	if a.inFlight {
+		a.mu.Unlock()
+		return ErrProgramRunning
+	}
+	a.program = program
+	a.inFlight = true
+	a.mu.Unlock()
+
+	defer func() {
+		a.mu.Lock()
+		a.program = nil
+		a.inFlight = false
+		a.mu.Unlock()
+	}()
+
+	_, runErr := program.Run()
+	return runErr
 }
 
 type phaseStatus int
@@ -61,6 +174,7 @@ type model struct {
 	phaseCtx     *phases.Context
 	observer     *phaseObserver
 	inputHandler *bubbleInputHandler
+	runCtx       context.Context
 
 	phases map[string]*phaseState
 	order  []string
@@ -86,32 +200,36 @@ type model struct {
 
 	width  int
 	height int
+
+	initialStartIndex int
 }
 
-func newModel() *model {
+func newModel(cfg Config, startIndex int, runCtx context.Context) (*model, error) {
+	if len(cfg.Phases) == 0 {
+		return nil, ErrNoPhases
+	}
+
 	phaseCtx := phases.NewContext()
 	inputHandler := newBubbleInputHandler()
 	observer := newPhaseObserver()
 
-	manager := phases.NewManager(
+	managerOpts := append([]phases.ManagerOption{}, cfg.ManagerOptions...)
+	managerOpts = append(managerOpts,
 		phases.WithObserver(observer),
 		phases.WithInputHandler(inputHandler),
 	)
+	manager := phases.NewManager(managerOpts...)
 
-	phaseList := []phases.Phase{
-		sshconnect.New(),
-		sudoensure.New(),
-		pythonensure.New(),
-		ansibleuser.New(),
+	if err := manager.Register(cfg.Phases...); err != nil {
+		return nil, err
 	}
 
-	if err := manager.Register(phaseList...); err != nil {
-		log.Fatalf("failed to register phases: %v", err)
-	}
-
-	states := make(map[string]*phaseState, len(phaseList))
-	order := make([]string, 0, len(phaseList))
-	for _, ph := range phaseList {
+	states := make(map[string]*phaseState, len(cfg.Phases))
+	order := make([]string, 0, len(cfg.Phases))
+	for _, ph := range cfg.Phases {
+		if ph == nil {
+			continue
+		}
 		meta := ph.Metadata()
 		states[meta.ID] = &phaseState{meta: meta, status: statusPending}
 		order = append(order, meta.ID)
@@ -124,26 +242,32 @@ func newModel() *model {
 	ti.Placeholder = "enter value"
 	ti.Blur()
 
-	return &model{
-		manager:        manager,
-		phaseCtx:       phaseCtx,
-		observer:       observer,
-		inputHandler:   inputHandler,
-		phases:         states,
-		order:          order,
-		spinner:        sp,
-		prompt:         ti,
-		focus:          focusPhases,
-		selectedPhase:  0,
-		savedInputs:    make(map[string]map[string]any),
-		secretValues:   make(map[string]struct{}),
-		statusMsg:      "Awaiting phase events…",
-		pipelineActive: false,
+	if runCtx == nil {
+		runCtx = context.Background()
 	}
+
+	return &model{
+		manager:           manager,
+		phaseCtx:          phaseCtx,
+		observer:          observer,
+		inputHandler:      inputHandler,
+		runCtx:            runCtx,
+		phases:            states,
+		order:             order,
+		spinner:           sp,
+		prompt:            ti,
+		focus:             focusPhases,
+		selectedPhase:     0,
+		savedInputs:       make(map[string]map[string]any),
+		secretValues:      make(map[string]struct{}),
+		statusMsg:         "Awaiting phase events…",
+		pipelineActive:    false,
+		initialStartIndex: startIndex,
+	}, nil
 }
 
 func (m *model) Init() tea.Cmd {
-	return m.startPipelineFrom(0)
+	return m.startPipelineFrom(m.initialStartIndex)
 }
 
 func (m *model) startPipeline() tea.Cmd {
@@ -155,7 +279,7 @@ func (m *model) startPipelineFrom(start int) tea.Cmd {
 	m.pipelineActive = true
 	m.actionsVisible = false
 	return tea.Batch(
-		runManagerCmd(m.manager, m.phaseCtx, start),
+		runManagerCmd(m.runCtx, m.manager, m.phaseCtx, start),
 		waitPhaseEventCmd(m.observer),
 		waitInputRequestCmd(m.inputHandler),
 		m.spinner.Tick,
@@ -1179,9 +1303,12 @@ func waitInputRequestCmd(handler *bubbleInputHandler) tea.Cmd {
 	}
 }
 
-func runManagerCmd(manager *phases.Manager, ctx *phases.Context, start int) tea.Cmd {
+func runManagerCmd(runCtx context.Context, manager *phases.Manager, ctx *phases.Context, start int) tea.Cmd {
 	return func() tea.Msg {
-		err := manager.RunFrom(context.Background(), ctx, start)
+		if runCtx == nil {
+			runCtx = context.Background()
+		}
+		err := manager.RunFrom(runCtx, ctx, start)
 		return phasesFinishedMsg{err: err}
 	}
 }
