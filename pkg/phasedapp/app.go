@@ -75,6 +75,7 @@ type App struct {
 	cfg      Config
 	mu       sync.Mutex
 	program  *tea.Program
+	cancel   context.CancelFunc
 	inFlight bool
 }
 
@@ -108,11 +109,16 @@ func (a *App) StartFrom(ctx context.Context, start int) error {
 // Stop signals the running TUI program (if any) to exit.
 func (a *App) Stop() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.program == nil {
-		return nil
+	program := a.program
+	cancel := a.cancel
+	a.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
 	}
-	a.program.Quit()
+	if program != nil {
+		program.Quit()
+	}
 	return nil
 }
 
@@ -120,8 +126,10 @@ func (a *App) start(ctx context.Context, start int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	model, err := newModel(a.cfg, start, ctx)
+	runCtx, cancel := context.WithCancel(ctx)
+	model, err := newModel(a.cfg, start, runCtx)
 	if err != nil {
+		cancel()
 		return err
 	}
 	program := tea.NewProgram(model, a.cfg.ProgramOptions...)
@@ -129,20 +137,32 @@ func (a *App) start(ctx context.Context, start int) error {
 	a.mu.Lock()
 	if a.inFlight {
 		a.mu.Unlock()
+		cancel()
 		return ErrProgramRunning
 	}
 	a.program = program
+	a.cancel = cancel
 	a.inFlight = true
 	a.mu.Unlock()
 
-	defer func() {
-		a.mu.Lock()
-		a.program = nil
-		a.inFlight = false
-		a.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-runCtx.Done():
+			program.Quit()
+		case <-done:
+		}
 	}()
 
 	_, runErr := program.Run()
+	close(done)
+	cancel()
+
+	a.mu.Lock()
+	a.program = nil
+	a.cancel = nil
+	a.inFlight = false
+	a.mu.Unlock()
 	return runErr
 }
 

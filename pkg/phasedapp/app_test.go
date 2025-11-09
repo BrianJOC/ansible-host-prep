@@ -134,6 +134,32 @@ func TestAppRejectsConcurrentStart(t *testing.T) {
 	assertNoError(t, errCh)
 }
 
+func TestAppStartReturnsWhenContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	blocking := newStubPhaseFunc("block", func(ctx context.Context, _ *phasespkg.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	app := newTestApp(t, WithPhases(blocking))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := runAppAsync(app, ctx)
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected nil or context cancellation error, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("start did not return after cancellation")
+	}
+}
+
 // --- helpers ---
 
 func newTestApp(t *testing.T, opts ...Option) *App {
