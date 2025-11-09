@@ -72,7 +72,8 @@ type model struct {
 	prompting    bool
 	selectIndex  int
 
-	savedInputs map[string]map[string]any
+	savedInputs  map[string]map[string]any
+	secretValues map[string]struct{}
 
 	selectedPhase  int
 	focus          focusArea
@@ -135,6 +136,7 @@ func newModel() *model {
 		focus:          focusPhases,
 		selectedPhase:  0,
 		savedInputs:    make(map[string]map[string]any),
+		secretValues:   make(map[string]struct{}),
 		statusMsg:      "Awaiting phase events…",
 		pipelineActive: false,
 	}
@@ -257,9 +259,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pipelineActive = false
 		m.done = msg.err
 		if msg.err != nil {
-			m.statusMsg = msg.err.Error()
+			m.setStatus(msg.err.Error())
 		} else {
-			m.statusMsg = "All phases completed"
+			m.setStatus("All phases completed")
 		}
 		return m, nil
 	}
@@ -273,7 +275,7 @@ func (m *model) handlePhaseStarted(msg phaseStartedMsg) {
 		state.err = nil
 		m.appendLog(state, fmt.Sprintf("%s started", msg.meta.Title))
 	}
-	m.statusMsg = fmt.Sprintf("Running %s", msg.meta.Title)
+	m.setStatusf("Running %s", msg.meta.Title)
 }
 
 func (m *model) handlePhaseCompleted(msg phaseCompletedMsg) {
@@ -285,17 +287,18 @@ func (m *model) handlePhaseCompleted(msg phaseCompletedMsg) {
 		state.status = statusFailed
 		state.err = msg.err
 		m.appendLog(state, fmt.Sprintf("%s failed: %v", msg.meta.Title, msg.err))
-		m.statusMsg = fmt.Sprintf("%s failed — %v", msg.meta.Title, msg.err)
+		m.setStatusf("%s failed — %v", msg.meta.Title, msg.err)
 	} else {
 		state.status = statusSuccess
 		state.err = nil
 		m.appendLog(state, fmt.Sprintf("%s completed", msg.meta.Title))
-		m.statusMsg = fmt.Sprintf("%s completed", msg.meta.Title)
+		m.setStatusf("%s completed", msg.meta.Title)
 	}
 }
 
 func (m *model) preparePrompt(msg inputRequestMsg) {
 	m.actionsVisible = false
+	msg.reason = sanitizeInputReason(msg.input, msg.reason)
 	m.activePrompt = &msg
 	m.prompting = true
 	m.focus = focusPrompt
@@ -323,9 +326,9 @@ func (m *model) preparePrompt(msg inputRequestMsg) {
 		}
 		m.prompt.Blur()
 		if len(msg.input.Options) == 0 {
-			m.statusMsg = fmt.Sprintf("%s requested %s but no options available", msg.meta.Title, msg.input.Label)
+			m.setStatusf("%s requested %s but no options available", msg.meta.Title, msg.input.Label)
 		} else {
-			m.statusMsg = fmt.Sprintf("%s: choose %s (arrows, j/k, numbers)", msg.meta.Title, msg.input.Label)
+			m.setStatusf("%s: choose %s (arrows, j/k, numbers)", msg.meta.Title, msg.input.Label)
 		}
 	default:
 		m.prompt.Placeholder = placeholderText(msg.input, defaultValue)
@@ -336,7 +339,7 @@ func (m *model) preparePrompt(msg inputRequestMsg) {
 		}
 		m.prompt.CursorEnd()
 		m.prompt.Focus()
-		m.statusMsg = fmt.Sprintf("%s needs %s", msg.meta.Title, msg.input.Label)
+		m.setStatusf("%s needs %s", msg.meta.Title, msg.input.Label)
 	}
 }
 
@@ -356,7 +359,7 @@ func (m *model) submitPrompt() tea.Cmd {
 	if m.isSelectPrompt() {
 		value, ok := m.currentSelectionValue()
 		if !ok {
-			m.statusMsg = "No options available"
+			m.setStatus("No options available")
 			return nil
 		}
 		m.recordInput(value)
@@ -370,14 +373,14 @@ func (m *model) submitPrompt() tea.Cmd {
 			}
 		}
 		if value == "" && m.activePrompt.input.Required {
-			m.statusMsg = "Input required"
+			m.setStatus("Input required")
 			return nil
 		}
 		m.recordInput(value)
 		m.inputHandler.respond(value, nil)
 	}
 
-	m.statusMsg = "Input submitted"
+	m.setStatus("Input submitted")
 	return waitInputRequestCmd(m.inputHandler)
 }
 
@@ -389,6 +392,9 @@ func (m *model) recordInput(value any) {
 		m.savedInputs[m.activePrompt.meta.ID] = make(map[string]any)
 	}
 	m.savedInputs[m.activePrompt.meta.ID][m.activePrompt.input.ID] = value
+	if m.activePrompt.input.Kind == phases.InputKindSecret {
+		m.trackSecretValue(value)
+	}
 	phases.SetInput(m.phaseCtx, m.activePrompt.meta.ID, m.activePrompt.input.ID, value)
 }
 
@@ -410,7 +416,7 @@ func (m *model) handleEscape() tea.Cmd {
 		m.prompt.SetValue("")
 		m.prompt.EchoMode = textinput.EchoNormal
 		m.focus = focusPhases
-		m.statusMsg = "Input cancelled"
+		m.setStatus("Input cancelled")
 		return waitInputRequestCmd(m.inputHandler)
 	}
 	return nil
@@ -426,6 +432,7 @@ func (m *model) toggleFocus() {
 
 func (m *model) restartPipeline() tea.Cmd {
 	if m.pipelineActive {
+		m.setStatus("Pipeline already running")
 		return nil
 	}
 
@@ -445,13 +452,13 @@ func (m *model) restartPipeline() tea.Cmd {
 	}
 	m.selectedPhase = 0
 	m.done = nil
-	m.statusMsg = "Restarting pipeline"
+	m.setStatus("Restarting pipeline")
 	return m.startPipeline()
 }
 
 func (m *model) retrySelectedPhase() tea.Cmd {
 	if m.pipelineActive {
-		m.statusMsg = "Pipeline already running"
+		m.setStatus("Pipeline already running")
 		return nil
 	}
 	state := m.currentPhaseState()
@@ -468,7 +475,7 @@ func (m *model) retrySelectedPhase() tea.Cmd {
 		}
 	}
 	m.done = nil
-	m.statusMsg = fmt.Sprintf("Retrying from %s", state.meta.Title)
+	m.setStatusf("Retrying from %s", state.meta.Title)
 	return m.startPipelineFrom(start)
 }
 
@@ -501,7 +508,7 @@ func (m *model) handleActionKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 				m.actionsVisible = false
 				return true, cmd
 			}
-			m.statusMsg = "Cannot retry while pipeline is running"
+			m.setStatus("Cannot retry while pipeline is running")
 			m.actionsVisible = false
 			return true, nil
 		case '3', 'c', 'C':
@@ -516,14 +523,14 @@ func (m *model) handleActionKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
 func (m *model) copySelectedError() {
 	state := m.currentPhaseState()
 	if state == nil || state.err == nil {
-		m.statusMsg = "No error to copy"
+		m.setStatus("No error to copy")
 		return
 	}
 	if err := clipboard.WriteAll(state.err.Error()); err != nil {
-		m.statusMsg = "Failed to copy error"
+		m.setStatus("Failed to copy error")
 		return
 	}
-	m.statusMsg = "Error copied to clipboard"
+	m.setStatus("Error copied to clipboard")
 }
 
 func (m *model) handlePhaseNavigation(msg tea.KeyMsg) bool {
@@ -619,12 +626,15 @@ func (m *model) View() string {
 	}
 
 	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
-	width := m.viewportWidth()
-	height := lipgloss.Height(view)
-	if viewportHeight := m.viewportHeight(); viewportHeight > height {
-		height = viewportHeight
+	renderWidth := m.terminalWidth()
+	if renderWidth <= 0 {
+		renderWidth = lipgloss.Width(view)
 	}
-	return lipgloss.Place(width, height, lipgloss.Left, lipgloss.Top, view)
+	renderHeight := lipgloss.Height(view)
+	if viewportHeight := m.viewportHeight(); viewportHeight > renderHeight {
+		renderHeight = viewportHeight
+	}
+	return lipgloss.Place(renderWidth, renderHeight, lipgloss.Left, lipgloss.Top, view)
 }
 
 func renderHeader(done, total int) string {
@@ -892,6 +902,7 @@ func (m *model) appendLog(state *phaseState, line string) {
 	if state == nil {
 		return
 	}
+	line = m.redactSecrets(line)
 	timestamp := time.Now().Format("15:04:05")
 	state.logs = append(state.logs, fmt.Sprintf("[%s] %s", timestamp, line))
 	if len(state.logs) > 20 {
@@ -922,6 +933,56 @@ func (m *model) viewportHeight() int {
 	return 0
 }
 
+func (m *model) terminalWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return 0
+}
+
+func (m *model) trackSecretValue(value any) {
+	if value == nil {
+		return
+	}
+	str := strings.TrimSpace(fmt.Sprint(value))
+	if str == "" || str == "<nil>" {
+		return
+	}
+	m.secretValues[str] = struct{}{}
+}
+
+func (m *model) redactSecrets(text string) string {
+	if text == "" || len(m.secretValues) == 0 {
+		return text
+	}
+	redacted := text
+	for secret := range m.secretValues {
+		if secret == "" {
+			continue
+		}
+		redacted = strings.ReplaceAll(redacted, secret, "[secret]")
+	}
+	return redacted
+}
+
+func (m *model) setStatus(msg string) {
+	m.statusMsg = m.redactSecrets(msg)
+}
+
+func (m *model) setStatusf(format string, args ...any) {
+	m.setStatus(fmt.Sprintf(format, args...))
+}
+
+func sanitizeInputReason(def phases.InputDefinition, reason string) string {
+	if reason == "" {
+		return ""
+	}
+	if def.Kind == phases.InputKindSecret {
+		return "Previous entry was rejected; please provide a new value."
+	}
+	return reason
+}
+
 func styleForWidth(base lipgloss.Style, totalWidth int) lipgloss.Style {
 	style := base.Copy()
 	if totalWidth <= 0 {
@@ -936,7 +997,10 @@ func styleForWidth(base lipgloss.Style, totalWidth int) lipgloss.Style {
 }
 
 func placeholderText(def phases.InputDefinition, defaultValue string) string {
-	if defaultValue != "" && def.Kind != phases.InputKindSecret {
+	if def.Kind == phases.InputKindSecret {
+		return "enter value"
+	}
+	if defaultValue != "" {
 		return defaultValue
 	}
 	return def.Label
