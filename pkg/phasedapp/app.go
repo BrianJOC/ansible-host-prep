@@ -279,7 +279,13 @@ func (m *model) startPipeline() tea.Cmd {
 }
 
 func (m *model) startPipelineFrom(start int) tea.Cmd {
-	start = m.clampStartIndex(start)
+	if start < 0 {
+		start = 0
+	}
+	if len(m.order) == 0 || start >= len(m.order) {
+		m.pipelineActive = false
+		return func() tea.Msg { return phasesFinishedMsg{} }
+	}
 	m.pipelineActive = true
 	m.actionsVisible = false
 	return tea.Batch(

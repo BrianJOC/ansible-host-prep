@@ -71,6 +71,32 @@ func TestAppStartFromSkipsLeadingPhases(t *testing.T) {
 	}
 }
 
+func TestAppStartFromBeyondEndIsNoop(t *testing.T) {
+	t.Parallel()
+
+	observer := newRecordingObserver(0)
+	app := newTestApp(t,
+		WithPhases(newStubPhase("only")),
+		WithManagerOptions(phasespkg.WithObserver(observer)),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := runAppAsyncStartFrom(app, ctx, 5)
+
+	time.Sleep(50 * time.Millisecond)
+
+	if len(observer.events()) != 0 {
+		t.Fatalf("expected no events, got %v", observer.events())
+	}
+
+	if err := app.Stop(); err != nil {
+		t.Fatalf("stop error: %v", err)
+	}
+	assertNoError(t, errCh)
+}
+
 func TestAppRejectsConcurrentStart(t *testing.T) {
 	t.Parallel()
 
