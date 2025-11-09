@@ -13,7 +13,7 @@ init:
     . bin/activate-hermit
 
 fmt:
-    rg --files -g '*.go' | xargs gofmt -w
+    go fmt ./...
 
 format:
     @just fmt
@@ -31,6 +31,6 @@ run:
     go run ./cmd/bootstrap-tui
 
 tui:
-    go run ./tui
+    go run ./cmd/bootstrap-tui
 
 ci: fmt lint test build
