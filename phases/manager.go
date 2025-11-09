@@ -67,10 +67,26 @@ func (m *Manager) Register(phases ...Phase) error {
 
 // Run executes all registered phases sequentially.
 func (m *Manager) Run(ctx context.Context, phaseCtx *Context) error {
+	return m.runFrom(ctx, phaseCtx, 0)
+}
+
+// RunFrom executes phases starting at the provided index (0-based).
+func (m *Manager) RunFrom(ctx context.Context, phaseCtx *Context, start int) error {
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(m.phases) {
+		return nil
+	}
+	return m.runFrom(ctx, phaseCtx, start)
+}
+
+func (m *Manager) runFrom(ctx context.Context, phaseCtx *Context, start int) error {
 	if phaseCtx == nil {
 		phaseCtx = NewContext()
 	}
-	for _, phase := range m.phases {
+	for i := start; i < len(m.phases); i++ {
+		phase := m.phases[i]
 		meta := phase.Metadata()
 		m.notifyStart(meta)
 		err := m.executePhase(ctx, phaseCtx, phase, meta)

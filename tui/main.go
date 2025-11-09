@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/spinner"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -77,9 +78,13 @@ type model struct {
 	focus          focusArea
 	helpVisible    bool
 	pipelineActive bool
+	actionsVisible bool
 
 	statusMsg string
 	done      error
+
+	width  int
+	height int
 }
 
 func newModel() *model {
@@ -136,22 +141,56 @@ func newModel() *model {
 }
 
 func (m *model) Init() tea.Cmd {
-	return m.startPipeline()
+	return m.startPipelineFrom(0)
 }
 
 func (m *model) startPipeline() tea.Cmd {
+	return m.startPipelineFrom(0)
+}
+
+func (m *model) startPipelineFrom(start int) tea.Cmd {
+	start = m.clampStartIndex(start)
 	m.pipelineActive = true
+	m.actionsVisible = false
 	return tea.Batch(
-		runManagerCmd(m.manager, m.phaseCtx),
+		runManagerCmd(m.manager, m.phaseCtx, start),
 		waitPhaseEventCmd(m.observer),
 		waitInputRequestCmd(m.inputHandler),
 		m.spinner.Tick,
 	)
 }
 
+func (m *model) clampStartIndex(idx int) int {
+	if len(m.order) == 0 {
+		return 0
+	}
+	if idx < 0 {
+		return 0
+	}
+	if idx >= len(m.order) {
+		return len(m.order) - 1
+	}
+	return idx
+}
+
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		prevWidth := m.width
+		prevHeight := m.height
+		m.width = msg.Width
+		m.height = msg.Height
+		if (prevWidth > 0 && msg.Width < prevWidth) || (prevHeight > 0 && msg.Height < prevHeight) {
+			return m, tea.ClearScreen
+		}
+		return m, nil
 	case tea.KeyMsg:
+		if m.actionsVisible {
+			if handled, cmd := m.handleActionKeys(msg); handled {
+				return m, cmd
+			}
+			return m, nil
+		}
 		if m.handleSelectPromptNavigation(msg) {
 			return m, nil
 		}
@@ -166,6 +205,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			if m.prompting && m.focus == focusPrompt {
 				return m, m.submitPrompt()
+			}
+			if !m.prompting && m.focus == focusPhases {
+				m.actionsVisible = !m.actionsVisible
+				m.helpVisible = false
+				return m, nil
 			}
 		case tea.KeyEsc:
 			return m, m.handleEscape()
@@ -251,6 +295,7 @@ func (m *model) handlePhaseCompleted(msg phaseCompletedMsg) {
 }
 
 func (m *model) preparePrompt(msg inputRequestMsg) {
+	m.actionsVisible = false
 	m.activePrompt = &msg
 	m.prompting = true
 	m.focus = focusPrompt
@@ -259,6 +304,17 @@ func (m *model) preparePrompt(msg inputRequestMsg) {
 
 	prevVal, _ := m.lookupInputString(msg.meta.ID, msg.input.ID)
 	defaultValue := defaultString(msg.input.Default)
+
+	if msg.input.Kind == phases.InputKindSelect && prevVal == "" && defaultValue != "" {
+		prevVal = defaultValue
+	}
+
+	m.prompt.EchoMode = textinput.EchoNormal
+	m.prompt.EchoCharacter = '*'
+	if msg.input.Kind == phases.InputKindSecret {
+		m.prompt.EchoMode = textinput.EchoPassword
+		m.prompt.EchoCharacter = '•'
+	}
 
 	switch msg.input.Kind {
 	case phases.InputKindSelect:
@@ -293,6 +349,7 @@ func (m *model) submitPrompt() tea.Cmd {
 		m.prompting = false
 		m.activePrompt = nil
 		m.prompt.SetValue("")
+		m.prompt.EchoMode = textinput.EchoNormal
 		m.focus = focusPhases
 	}()
 
@@ -336,6 +393,10 @@ func (m *model) recordInput(value any) {
 }
 
 func (m *model) handleEscape() tea.Cmd {
+	if m.actionsVisible {
+		m.actionsVisible = false
+		return nil
+	}
 	if m.helpVisible {
 		m.helpVisible = false
 		return nil
@@ -347,6 +408,7 @@ func (m *model) handleEscape() tea.Cmd {
 		}
 		m.activePrompt = nil
 		m.prompt.SetValue("")
+		m.prompt.EchoMode = textinput.EchoNormal
 		m.focus = focusPhases
 		m.statusMsg = "Input cancelled"
 		return waitInputRequestCmd(m.inputHandler)
@@ -387,7 +449,87 @@ func (m *model) restartPipeline() tea.Cmd {
 	return m.startPipeline()
 }
 
+func (m *model) retrySelectedPhase() tea.Cmd {
+	if m.pipelineActive {
+		m.statusMsg = "Pipeline already running"
+		return nil
+	}
+	state := m.currentPhaseState()
+	if state == nil {
+		return nil
+	}
+	start := m.clampStartIndex(m.selectedPhase)
+	for idx := start; idx < len(m.order); idx++ {
+		id := m.order[idx]
+		if st, ok := m.phases[id]; ok && st != nil {
+			st.status = statusPending
+			st.err = nil
+			st.logs = nil
+		}
+	}
+	m.done = nil
+	m.statusMsg = fmt.Sprintf("Retrying from %s", state.meta.Title)
+	return m.startPipelineFrom(start)
+}
+
+func (m *model) currentPhaseState() *phaseState {
+	if len(m.order) == 0 {
+		return nil
+	}
+	idx := m.clampStartIndex(m.selectedPhase)
+	id := m.order[idx]
+	return m.phases[id]
+}
+
+func (m *model) handleActionKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.actionsVisible = false
+		return true, nil
+	case tea.KeyEnter:
+		m.actionsVisible = false
+		return true, nil
+	}
+	if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case '1', 'v', 'V':
+			m.actionsVisible = false
+			return true, nil
+		case '2', 'r', 'R':
+			if !m.pipelineActive {
+				cmd := m.retrySelectedPhase()
+				m.actionsVisible = false
+				return true, cmd
+			}
+			m.statusMsg = "Cannot retry while pipeline is running"
+			m.actionsVisible = false
+			return true, nil
+		case '3', 'c', 'C':
+			m.copySelectedError()
+			m.actionsVisible = false
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (m *model) copySelectedError() {
+	state := m.currentPhaseState()
+	if state == nil || state.err == nil {
+		m.statusMsg = "No error to copy"
+		return
+	}
+	if err := clipboard.WriteAll(state.err.Error()); err != nil {
+		m.statusMsg = "Failed to copy error"
+		return
+	}
+	m.statusMsg = "Error copied to clipboard"
+}
+
 func (m *model) handlePhaseNavigation(msg tea.KeyMsg) bool {
+	if m.actionsVisible {
+		return false
+	}
 	if m.prompting && m.focus != focusPhases {
 		return false
 	}
@@ -457,28 +599,32 @@ func (m *model) View() string {
 	header := renderHeader(completedCount(m.phases), len(m.order))
 	body := m.renderBody()
 	promptPanel := m.renderPromptPanel()
+	var actionsPanel string
+	if m.actionsVisible {
+		actionsPanel = m.renderActionsPanel()
+	}
 	statusBar := statusBarStyle.Render(m.statusMsg)
-	footer := footerStyle.Render("↑/↓ or j/k move • Enter submit • Tab switch focus • r restart • ? help • Ctrl+C quit")
+	footer := footerStyle.Render("↑/↓ or j/k move • Enter actions • Tab switch focus • r restart • ? help • Ctrl+C quit")
+
+	sections := []string{header, body}
+	if actionsPanel != "" {
+		sections = append(sections, actionsPanel)
+	}
+	sections = append(sections, promptPanel, statusBar)
 
 	if m.helpVisible {
-		return lipgloss.JoinVertical(
-			lipgloss.Left,
-			header,
-			body,
-			promptPanel,
-			statusBar,
-			renderHelp(),
-		)
+		sections = append(sections, renderHelp())
+	} else {
+		sections = append(sections, footer)
 	}
 
-	return lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		body,
-		promptPanel,
-		statusBar,
-		footer,
-	)
+	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	width := m.viewportWidth()
+	height := lipgloss.Height(view)
+	if viewportHeight := m.viewportHeight(); viewportHeight > height {
+		height = viewportHeight
+	}
+	return lipgloss.Place(width, height, lipgloss.Left, lipgloss.Top, view)
 }
 
 func renderHeader(done, total int) string {
@@ -488,12 +634,27 @@ func renderHeader(done, total int) string {
 }
 
 func (m *model) renderBody() string {
-	phaseList := m.renderPhaseList()
-	details := m.renderPhaseDetails()
-	return lipgloss.JoinHorizontal(lipgloss.Top, phaseList, details)
+	width := m.viewportWidth()
+	if width < 80 {
+		list := m.renderPhaseList(width)
+		detail := m.renderPhaseDetails(width)
+		return lipgloss.JoinVertical(lipgloss.Left, list, detail)
+	}
+	left := width/2 - 1
+	if left < 30 {
+		left = 30
+	}
+	right := width - left - 2
+	if right < 30 {
+		right = 30
+	}
+	list := m.renderPhaseList(left)
+	detail := m.renderPhaseDetails(right)
+	gap := lipgloss.NewStyle().Width(2).Render(" ")
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, gap, detail)
 }
 
-func (m *model) renderPhaseList() string {
+func (m *model) renderPhaseList(width int) string {
 	items := make([]string, 0, len(m.order))
 	for idx, id := range m.order {
 		state := m.phases[id]
@@ -504,23 +665,23 @@ func (m *model) renderPhaseList() string {
 		items = append(items, phaseItemView(state, selected, m.focus == focusPhases && (!m.prompting || m.focus == focusPhases)))
 	}
 	content := strings.Join(items, "\n")
-	style := listPanelStyle
+	style := styleForWidth(listPanelStyle, width)
 	if m.focus == focusPhases && (!m.prompting || m.focus == focusPhases) {
 		style = style.Copy().BorderForeground(activeBorderColor)
 	}
 	return style.Render(content)
 }
 
-func (m *model) renderPhaseDetails() string {
+func (m *model) renderPhaseDetails(width int) string {
 	if len(m.order) == 0 {
-		return detailPanelStyle.Render("No phases registered")
+		return styleForWidth(detailPanelStyle, width).Render("No phases registered")
 	}
 	if m.selectedPhase >= len(m.order) {
 		m.selectedPhase = len(m.order) - 1
 	}
 	state := m.phases[m.order[m.selectedPhase]]
 	if state == nil {
-		return detailPanelStyle.Render("No phase data")
+		return styleForWidth(detailPanelStyle, width).Render("No phase data")
 	}
 
 	title := detailTitleStyle.Render(state.meta.Title)
@@ -551,11 +712,11 @@ func (m *model) renderPhaseDetails() string {
 	if logLines != "" {
 		body = append(body, logLines)
 	}
-	return detailPanelStyle.Render(strings.Join(body, "\n"))
+	return styleForWidth(detailPanelStyle, width).Render(strings.Join(body, "\n"))
 }
 
 func (m *model) renderPromptPanel() string {
-	style := promptPanelStyle
+	style := styleForWidth(promptPanelStyle, m.viewportWidth())
 	if m.prompting && m.focus == focusPrompt {
 		style = style.Copy().BorderForeground(activeBorderColor)
 	}
@@ -588,6 +749,21 @@ func (m *model) renderPromptPanel() string {
 	return style.Render(b.String())
 }
 
+func (m *model) renderActionsPanel() string {
+	state := m.currentPhaseState()
+	if state == nil {
+		return ""
+	}
+	options := []string{
+		actionLine("1", "Close", true),
+		actionLine("2", "Retry from this phase", !m.pipelineActive),
+		actionLine("3", "Copy error message", state.err != nil),
+	}
+	header := fmt.Sprintf("Actions — %s", state.meta.Title)
+	content := header + "\n" + strings.Join(options, "\n")
+	return styleForWidth(actionsPanelStyle, m.viewportWidth()).Render(content)
+}
+
 func (m *model) renderSelectOptions() string {
 	options := m.activePrompt.input.Options
 	if len(options) == 0 {
@@ -612,10 +788,10 @@ func renderHelp() string {
 	help := []string{
 		"Key Bindings:",
 		"  ↑/↓ or j/k  Move phase selection",
-		"  Enter        Submit input / confirm selection",
+		"  Enter        Submit input / open phase actions",
 		"  Tab          Switch focus between phases and prompt",
 		"  r / Ctrl+R   Restart pipeline",
-		"  Esc          Cancel prompt or hide help",
+		"  Esc          Cancel prompt, hide help, or close actions",
 		"  ?            Toggle this help",
 		"  Ctrl+C       Quit",
 	}
@@ -729,6 +905,36 @@ func statusDisplay(status phaseStatus) string {
 	return titleCase.String(status.String())
 }
 
+func (m *model) viewportWidth() int {
+	if m.width > 0 {
+		if m.width < 40 {
+			return 40
+		}
+		return m.width
+	}
+	return 100
+}
+
+func (m *model) viewportHeight() int {
+	if m.height > 0 {
+		return m.height
+	}
+	return 0
+}
+
+func styleForWidth(base lipgloss.Style, totalWidth int) lipgloss.Style {
+	style := base.Copy()
+	if totalWidth <= 0 {
+		return style.Width(0)
+	}
+	frameWidth, _ := base.GetFrameSize()
+	contentWidth := totalWidth - frameWidth
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
+	return style.Width(contentWidth)
+}
+
 func placeholderText(def phases.InputDefinition, defaultValue string) string {
 	if defaultValue != "" && def.Kind != phases.InputKindSecret {
 		return defaultValue
@@ -747,20 +953,30 @@ func defaultString(value any) string {
 	return str
 }
 
+func actionLine(key, label string, enabled bool) string {
+	line := fmt.Sprintf("[%s] %s", key, label)
+	if enabled {
+		return infoTextStyle.Render(line)
+	}
+	return disabledTextStyle.Render(line + " (unavailable)")
+}
+
 // ---- Styling helpers ----
 
 var (
 	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E0AAFF"))
 	subtitleStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
-	listPanelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C566A")).Padding(0, 1).Width(38)
-	detailPanelStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C566A")).Padding(0, 1).Width(60).MarginLeft(2)
+	listPanelStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C566A")).Padding(0, 1)
+	detailPanelStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C566A")).Padding(0, 1)
 	promptPanelStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C566A")).Padding(0, 1).MarginTop(1)
+	actionsPanelStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#7C3AED")).Padding(0, 1).MarginTop(1)
 	statusBarStyle    = lipgloss.NewStyle().Bold(true).Padding(0, 1).Background(lipgloss.Color("#312E81")).Foreground(lipgloss.Color("#E0E7FF"))
 	footerStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8")).Padding(0, 1).MarginTop(1)
 	helpStyle         = lipgloss.NewStyle().Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("#7C3AED")).Padding(1, 2).MarginTop(1)
 	detailTitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FDE047"))
 	infoTextStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5F5"))
 	errorTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171"))
+	disabledTextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#475569"))
 	logSectionStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#A5B4FC")).Bold(true)
 	logTextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#E0E7FF"))
 	activeBorderColor = lipgloss.Color("#A78BFA")
@@ -899,9 +1115,9 @@ func waitInputRequestCmd(handler *bubbleInputHandler) tea.Cmd {
 	}
 }
 
-func runManagerCmd(manager *phases.Manager, ctx *phases.Context) tea.Cmd {
+func runManagerCmd(manager *phases.Manager, ctx *phases.Context, start int) tea.Cmd {
 	return func() tea.Msg {
-		err := manager.Run(context.Background(), ctx)
+		err := manager.RunFrom(context.Background(), ctx, start)
 		return phasesFinishedMsg{err: err}
 	}
 }

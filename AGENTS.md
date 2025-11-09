@@ -22,6 +22,7 @@
 - Keep functions under 40 lines where possible; extract helpers into `internal/<module>` when the API should remain private.
 - Prefer functional options for optional behavior (e.g., `sshconnection.WithTimeout`, `pkginstaller.WithCustomCheck`) instead of proliferating parameters so APIs remain stable.
 - When adding phases, populate `PhaseMetadata.Inputs` with clear `InputDefinition` records (ID, label, kind, secret/select flags) and store values via `phases.SetInput` so the manager/TUI can fulfill prompts consistently.
+- In the TUI, show default values as placeholder/background text for free-form inputs so the user can review or override them; only inject the default when the input is submitted empty. Select prompts may pre-select their default but should not overwrite prior user choices.
 
 ## Phase Workflow & Orchestration
 - Register phases in execution order (`sshconnect` → `sudoensure` → `pythonensure` → `ansibleuser`) using `phases.Manager`; use `WithInputHandler` and observers so TUIs can react to lifecycle events.
@@ -45,3 +46,4 @@
 - Activate the Hermit environment (`source bin/activate-hermit` or `bin\\activate-hermit` on Windows) so the pinned toolchain is used consistently.
 - Never commit secrets or SSH material; store sample configs under `utils/sshconnection/testdata` with redacted keys when fixtures are required, and generate ansible user keys with `sshkeypair` in temp directories during tests.
 - Validate any shell commands executed by the TUI against least-privilege requirements before shipping new automation.
+- Do not use `cat` (or similar shell heredocs) to edit files; rely on proper editors or tooling (`apply_patch`, `$EDITOR`, etc.) so accidental truncation is avoided.
