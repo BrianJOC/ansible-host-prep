@@ -258,6 +258,7 @@ func (m *model) preparePrompt(msg inputRequestMsg) {
 	m.selectIndex = 0
 
 	prevVal, _ := m.lookupInputString(msg.meta.ID, msg.input.ID)
+	defaultValue := defaultString(msg.input.Default)
 
 	switch msg.input.Kind {
 	case phases.InputKindSelect:
@@ -271,8 +272,8 @@ func (m *model) preparePrompt(msg inputRequestMsg) {
 			m.statusMsg = fmt.Sprintf("%s: choose %s (arrows, j/k, numbers)", msg.meta.Title, msg.input.Label)
 		}
 	default:
-		m.prompt.Placeholder = msg.input.Label
-		if msg.input.Kind != phases.InputKindSecret && prevVal != "" {
+		m.prompt.Placeholder = placeholderText(msg.input, defaultValue)
+		if prevVal != "" {
 			m.prompt.SetValue(prevVal)
 		} else {
 			m.prompt.SetValue("")
@@ -305,6 +306,12 @@ func (m *model) submitPrompt() tea.Cmd {
 		m.inputHandler.respond(value, nil)
 	} else {
 		value := strings.TrimSpace(m.prompt.Value())
+		if value == "" {
+			defaultValue := defaultString(m.activePrompt.input.Default)
+			if defaultValue != "" && m.activePrompt.input.Kind != phases.InputKindSecret {
+				value = defaultValue
+			}
+		}
 		if value == "" && m.activePrompt.input.Required {
 			m.statusMsg = "Input required"
 			return nil
@@ -720,6 +727,24 @@ var titleCase = cases.Title(language.English)
 
 func statusDisplay(status phaseStatus) string {
 	return titleCase.String(status.String())
+}
+
+func placeholderText(def phases.InputDefinition, defaultValue string) string {
+	if defaultValue != "" && def.Kind != phases.InputKindSecret {
+		return defaultValue
+	}
+	return def.Label
+}
+
+func defaultString(value any) string {
+	if value == nil {
+		return ""
+	}
+	str := strings.TrimSpace(fmt.Sprint(value))
+	if str == "" || str == "<nil>" {
+		return ""
+	}
+	return str
 }
 
 // ---- Styling helpers ----

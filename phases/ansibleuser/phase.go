@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/BrianJOC/ansible-host-prep/phases"
@@ -24,6 +25,7 @@ const (
 	ContextKeyKeyInfo    = "ansible:keypair_info"
 
 	defaultUsername = "ansible"
+	defaultKeyName  = "ansible_id"
 )
 
 // KeyPairEnsurer wraps sshkeypair.EnsureKeyPair.
@@ -140,7 +142,7 @@ func (p *Phase) resolveKeyPath(ctx *phases.Context) (string, error) {
 		return "", phases.InputRequestError{
 			PhaseID: phaseID,
 			Input:   keyPathDefinition(),
-			Reason:  "key path required to create ansible SSH key pair",
+			Reason:  fmt.Sprintf("key path required to create ansible SSH key pair (default %s)", defaultKeyPath()),
 		}
 	}
 	path := strings.TrimSpace(fmt.Sprint(val))
@@ -161,7 +163,16 @@ func keyPathDefinition() phases.InputDefinition {
 		Description: "Local path for the ansible user's SSH private key (e.g., ~/.ssh/ansible_id).",
 		Kind:        phases.InputKindText,
 		Required:    true,
+		Default:     defaultKeyPath(),
 	}
+}
+
+func defaultKeyPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join("~", ".ssh", defaultKeyName)
+	}
+	return filepath.Join(home, ".ssh", defaultKeyName)
 }
 
 type sudoRunner struct {

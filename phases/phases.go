@@ -31,6 +31,7 @@ type InputDefinition struct {
 	Required    bool
 	Secret      bool
 	Options     []InputOption
+	Default     any
 }
 
 // InputKind identifies how an input should be rendered.
