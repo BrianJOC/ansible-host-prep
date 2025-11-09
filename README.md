@@ -1,5 +1,7 @@
 # ansible-host-prep
 
+> **Status:** Beta — APIs, helpers, and bundles may change as the project evolves; expect occasional breaking changes until v1.
+
 Provision a remote Linux host so it is ready for Ansible by running a guided, repeatable bootstrap pipeline. The tool ships with a terminal UI that walks you through connecting over SSH, gaining sudo privileges, ensuring Python is present, and finally creating a dedicated `ansible` user with passwordless sudo and an SSH key.
 
 ## Why This Exists
@@ -218,4 +220,4 @@ Each phase uses typed context keys (e.g., `sshconnect.ContextKeySSHClient`, `sud
 
 ## License
 
-Specify your preferred license here (e.g., MIT, Apache-2.0). Until then, contributions default to the repository owner’s terms.
+Licensed under the [Apache License, Version 2.0](LICENSE).
