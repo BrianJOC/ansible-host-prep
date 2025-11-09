@@ -9,6 +9,9 @@ list:
 tidy:
     go mod tidy
 
+init:
+    . bin/activate-hermit
+
 fmt:
     rg --files -g '*.go' | xargs gofmt -w
 
