@@ -5,7 +5,7 @@
 - The primary CLI entrypoint is expected under `cmd/bootstrap-tui`, matching the build/run targets; keep each subcommand in its own file for clarity.
 - `phases/` owns the bootstrap pipeline (e.g., `sshconnect`, `sudoensure`, `pythonensure`, `ansibleuser`) plus the shared `Manager`, input definitions, and observers; new phases should expose metadata (ID, inputs, description) and communicate via the shared `phases.Context`.
 - `utils/` hosts supporting libraries (`sshconnection`, `privilege`, `sshkeypair`, `systemuser`, `pkginstaller`); keep these dependency-light so they can be imported from multiple phases.
-- `pkg/phasedapp/` hosts the Bubble Tea-driven phase runner; keep this UI layer thin by delegating logic to phases/util packages, and have entrypoints (e.g., `cmd/bootstrap-tui`) wire it up.
+- `pkg/phasedapp/` hosts the Bubble Tea-driven phase runner plus ergonomic helpers (SimplePhase, input/context utilities, builder, bundles); keep this layer generic so CLI entrypoints simply compose existing bundles or add custom phases.
 - `bin/` is Hermit-managed tooling (Go toolchain, `golangci-lint`, `just`, Python shims); do not edit files there manually.
 
 ## Build, Test, and Development Commands
@@ -25,9 +25,9 @@
 - In the TUI, show default values as placeholder/background text for free-form inputs so the user can review or override them; only inject the default when the input is submitted empty. Select prompts may pre-select their default but should not overwrite prior user choices.
 
 ## Phase Workflow & Orchestration
-- Register phases in execution order (`sshconnect` → `sudoensure` → `pythonensure` → `ansibleuser`) using `phases.Manager`; use `WithInputHandler` and observers so TUIs can react to lifecycle events.
+- Register phases in execution order (`sshconnect` → `sudoensure` → `pythonensure` → `ansibleuser`) using `phases.Manager` or the new `phasedapp.Builder`; use `WithInputHandler` and observers so TUIs can react to lifecycle events.
 - Surface missing or invalid operator input with `phases.InputRequestError`; the manager will pause execution, call the configured handler, and retry the phase.
-- Share data between phases through `phases.Context` keys (e.g., `sshconnect.ContextKeySSHClient`, `sudoensure.ContextKeyElevatedClient`, `pythonensure.ContextKeyInstalled`); document any new keys when you add phases so downstream code knows how to consume them.
+- Share data between phases through `phases.Context` keys (e.g., `sshconnect.ContextKeySSHClient`, `sudoensure.ContextKeyElevatedClient`, `pythonensure.ContextKeyInstalled`) or the typed helpers in `pkg/phasedapp/context_helpers.go`; document any new keys when you add phases so downstream code knows how to consume them.
 - Wrap privileged operations with the `utils/privilege` elevated client before calling runners such as `pkginstaller` or `systemuser`.
 
 ## Testing Guidelines
