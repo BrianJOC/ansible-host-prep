@@ -13,7 +13,7 @@ init:
     . bin/activate-hermit
 
 fmt:
-    rg --files -g '*.go' | xargs gofmt -w
+    go fmt ./...
 
 format:
     @just fmt
