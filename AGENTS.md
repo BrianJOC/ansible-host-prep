@@ -43,6 +43,7 @@
 - Confirm `just ci` passes locally before opening a PR; CI failures for lint or formatting will block merges.
 
 ## Security & Configuration Tips
+- Use the existing Go toolchain without reconfiguring Hermit; if you add dependencies, prefer `go get` followed by `go mod tidy` rather than modifying Hermit state.
 - Activate the Hermit environment (`source bin/activate-hermit` or `bin\\activate-hermit` on Windows) so the pinned toolchain is used consistently.
 - Never commit secrets or SSH material; store sample configs under `utils/sshconnection/testdata` with redacted keys when fixtures are required, and generate ansible user keys with `sshkeypair` in temp directories during tests.
 - Validate any shell commands executed by the TUI against least-privilege requirements before shipping new automation.
